@@ -33,6 +33,7 @@ class Conf(object):
         self.logLevel = None
         self.aClient = []
         self.fCfg = None
+        self.csfDir = None
 
     def loadLogLevel(self):
         try:
@@ -53,6 +54,26 @@ class Conf(object):
                 break
         fCfg.close()
         return self.logLevel
+
+    def loadCsfDir(self):
+        try:
+            fCfg = open(self.cfgFile, 'r')
+        except IOError, e:
+            print('Can not open configuration file %s: %s' % (self.cfgFile, e))
+            exit(2)
+        for line in fCfg:
+            line = line.strip()
+            if len(line) == 0:
+                continue
+            if line[0] == '#':
+                continue
+            if line[:6] == 'csfdir':
+                param = line.split(' = ', 1)
+                csfDir = param[1]
+                self.csfDir = csfDir
+                break
+        fCfg.close()
+        return self.csfDir
 
     def openCfg(self):
         if self.fCfg: return self.fCfg
@@ -392,12 +413,15 @@ class ReCmd(object):
 class CsfTool(object):
     def __init__(self, main, cmd=None):
         self.main = main
-        self.outFile = main.outFile
-        self.fOut = main.openFile(self.outFile, 'w')
+        self.outTotal = main.outTotal
+        self.outDetail = main.outDetail
+        self.fTotal = main.openFile(self.outTotal, 'w')
+        self.fDetail = main.openFile(self.outDetail, 'w')
         self.csfLog = main.csfLogFile
         self.fCsfLog = main.openFile(self.csfLog, 'a')
         self.workPath = '/app/aitask/jinhr/tranbill/tools'
         self.oldWorkPath = None
+        self.aExcluId = []
         self.cmd = 'java -Dcsf.client.name=web-ac-yyt -Djava.ext.dirs=./csfTest_lib csfTest.MainClient'
         if cmd:
             self.cmd = cmd
@@ -464,14 +488,22 @@ class CsfTool(object):
         aInfo = json.loads(line)
         logging.debug(json.dumps(aInfo, encoding="UTF-8", ensure_ascii=False))
         resBalance = 0
+        total = 0
         logging.debug('aInfo %s %d', type(aInfo), len(aInfo))
         for dInfo in aInfo:
             # logging.debug(dInfo)
             if dInfo['resUnit'] == 'KB':
+                if dInfo['resFreeType'] in self.aExcluId:
+                    continue
                 balance = int(dInfo['totalResFree']) - int(dInfo['totalResUsed'])
                 resBalance += balance
-        sOut = json.dumps(aInfo, encoding="UTF-8", ensure_ascii=False)
-        self.fOut.write(u'%s %s %d %s%s' % (self.aNum[0], self.aNum[1], resBalance, sOut, os.linesep))
+                total += dInfo['totalResFree']
+                # billid,prodId,validDate,expireDate,totalResFree,totalResUsed,balance,prodName,resFreeName,resFreeType,
+                self.fDetail.write(u'%s,%d,%s,%s,%d,%d,%d,%s,%s,%d%s' % (self.aNum[0], dInfo['prodId'], dInfo['validDate'], dInfo['expireDate'], dInfo['totalResFree'], dInfo['totalResUsed'], balance, dInfo['prodName'], dInfo['resFreeName'], dInfo['resFreeType'], os.linesep))
+
+        # sOut = json.dumps(aInfo, encoding="UTF-8", ensure_ascii=False)
+        # bill_id,total,totalbalance
+        self.fTotal.write(u'%s,%d,total=%d%s' % (self.aNum[0], total, resBalance, os.linesep))
 
     # def parseCsf(self, line):
     #     line = line.strip()
@@ -540,7 +572,8 @@ class CsfTool(object):
     #     # self.fOut.write('%s' % aInfo)
 
     def exit(self):
-        self.fOut.close()
+        self.fTotal.close()
+        self.fDetail.close()
         self.fCsfLog.close()
         os.chdir(self.oldWorkPath)
 
@@ -551,9 +584,21 @@ class Director(object):
         self.csfClient = csfClient
         self.inFile = main.inFile
         self.fIn = main.openFile(self.inFile, 'r')
+        self.aExcluId = []
 
     def saveOrderRsp(self, order):
         self.fRsp.write('%s %s\r\n' % (order.dParam['BILL_ID'], order.getStatus()))
+
+    def loadExcludeId(self):
+        fExl = self.main.openFile(self.main.excludeFile, 'r')
+        aExclu = []
+        for line in fExl:
+            aExclu.append(line.strip())
+        fExl.close()
+        aSorted = sorted(aExclu)
+        self.aExcluId = aSorted
+        self.csfClient.aExcluId = aSorted
+        logging.debug(aSorted)
 
     def start(self):
         logging.info('csf tool starting...')
@@ -570,7 +615,7 @@ class Director(object):
             self.csfClient.setNum(tPara)
             self.csfClient.makeProperty()
             self.csfClient.query()
-            time.sleep(1)
+            # time.sleep(1)
         self.csfClient.exit()
         logging.info('csf tool complete.')
 
@@ -581,6 +626,9 @@ class Main(object):
         self.baseName = os.path.basename(self.Name)
         self.argc = len(sys.argv)
         self.inFile = None
+        self.excludeFile = 'excludeid.cfg'
+        self.csfDir = None
+        self.cfgFile = None
 
     def parseWorkEnv(self):
         dirBin, appName = os.path.split(self.Name)
@@ -605,7 +653,7 @@ class Main(object):
                 self.dirApp = dirApp
 
         # self.dirLog = os.path.join(self.dirApp, 'log')
-        self.dirCfg = os.path.join(self.dirApp, 'config')
+        self.dirCfg = os.getcwd()
         # self.dirTpl = os.path.join(self.dirApp, 'template')
         # self.dirLib = os.path.join(self.dirApp, 'lib')
         self.dirLog = os.getcwd()
@@ -613,21 +661,26 @@ class Main(object):
 
         self.today = time.strftime("%Y%m%d", time.localtime())
         inBaseFile = os.path.basename(self.inFile)
-        cfgName = '%s.cfg' % self.appNameBody
+        if self.cfgFile:
+            cfgName = self.cfgFile
+        else:
+            cfgName = '%s.cfg' % self.appNameBody
         logName = '%s_%s.log' % (self.inFile, self.today)
         csfLogName = '%s_%s.csflog' % (inBaseFile, self.today)
-        outName = '%s.out' % inBaseFile
+        outTotalName = '%s.total' % inBaseFile
+        outDetailName = '%s.detail' % inBaseFile
         logPre = '%s_%s' % (self.appNameBody, self.today)
         self.cfgFile = os.path.join(self.dirCfg, cfgName)
         self.logFile = os.path.join(self.dirLog, logName)
         self.csfLogFile = os.path.join(self.dirLog, csfLogName)
-        self.outFile = os.path.join(self.dirOut, outName)
+        self.outTotal = os.path.join(self.dirOut, outTotalName)
+        self.outDetail = os.path.join(self.dirOut, outDetailName)
 
     def checkArgv(self):
         if self.argc < 2:
             self.usage()
         # self.checkopt()
-        argvs = sys.argv[1:]
+        argvs = sys.argv
 
         # self.group = []
         # self.hosts = []
@@ -641,11 +694,15 @@ class Main(object):
         #         self.group = arg.split(',')
         #      elif opt == '-h':
         #          self.hosts = arg.split(',')
-        self.inFile = argvs[0]
+        if self.argc == 3:
+            self.cfgFile = argvs[1]
+            self.inFile = argvs[2]
+        elif self.argc == 2:
+            self.inFile = argvs[1]
 
     def usage(self):
-        print "Usage: %s infile" % self.baseName
-        print "example:   %s %s" % (self.baseName,' datafile')
+        print "Usage: %s [cfgfile] infile" % self.baseName
+        print "example:   %s %s %s" % (self.baseName, 'csfqry.cfg1', 'datafile')
         exit(1)
 
     def openFile(self, fileName, mode):
@@ -660,15 +717,18 @@ class Main(object):
         self.checkArgv()
         self.parseWorkEnv()
 
-        # self.cfg = Conf(self.cfgFile)
-        # self.logLevel = self.cfg.loadLogLevel()
-        self.logLevel = logging.DEBUG
+        self.cfg = Conf(self.cfgFile)
+        self.logLevel = self.cfg.loadLogLevel()
+        # self.logLevel = logging.DEBUG
 
         logging.basicConfig(filename=self.logFile, level=self.logLevel, format='%(asctime)s %(levelname)s %(message)s',
                             datefmt='%Y%m%d%I%M%S')
         logging.info('%s starting...' % self.baseName)
 
+        self.csfDir = self.cfg.loadCsfDir()
         csf = CsfTool(self)
+        if self.csfDir:
+            csf.workPath = self.csfDir
         director = Director(self, csf)
         director.start()
 
