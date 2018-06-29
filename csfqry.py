@@ -13,6 +13,7 @@ import signal
 import getopt
 # import cx_Oracle as orcl
 import socket
+import json
 # import hostdirs
 # from multiprocessing.managers import BaseManager
 # import pexpect
@@ -405,7 +406,7 @@ class CsfTool(object):
                           'INPUT_STRING':'{"billId":"%s","acctId":"","validDate":"%s","expireDate":""}',
                           'CSF_CODE':'ams_IBJFreeResCSV_queryShareTerminalFreeResOther',
                           'OUTPUT_TYPE':'java.lang.String'}
-        self.dPatt = {'10start':r'[main] () (MainClient.java:26',
+        self.dPatt = {'10start':r'[main] () (MainClient.java:26 xxxx canceled ',
                       '20callend':r'[main] () (ClientStub.java:110)',
                       '30outstart':r'[main] () (MainClient.java:85)',
                       '40outend':r'[main] () (MainClient.java:90)'}
@@ -453,49 +454,90 @@ class CsfTool(object):
                     break
         f.close()
 
-
     def parseCsf(self, line):
+        line = unicode(line, 'utf-8')
         line = line.strip()
-        line = unicode(line,'utf-8')
-        # line = line.decode('utf-8')
-        line = line.replace(r'\"', '')
-        # infoLen = len(line)
-        # # sInfo = "'%s'" % line[1:infoLen-1]
-        # sInfo = line[1:infoLen - 1]
-        # cmd = 'aInfo = %s' % sInfo
-        # aInfo = eval(cmd)
-        line = line.replace('},{', '|')
-        aInfo = line.split('|')
-        logging.debug(aInfo)
+        infoLen = len(line)
+        line = line[1:infoLen - 1]
+        line = line.replace(u'\\', u'')
+        logging.debug(line)
+        aInfo = json.loads(line)
+        logging.debug(json.dumps(aInfo, encoding="UTF-8", ensure_ascii=False))
         resBalance = 0
-        for info in aInfo:
-            logging.debug(info)
-            # # dInfo = eval(info)
-            # dInfo = info
-            # if dInfo['resUnit'] == 'KB':
-            #     balance = int(dInfo['totalResFree']) - int(dInfo['totalResUsed'])
-            #     resBalance += balance
-            aRow = info.split(',')
-            isRes = 0
-            total = 0
-            used = 0
-            balance = 0
-            for pa in aRow:
-                aPa = pa.split(':')
-                if aPa[0] == 'resUnit' and aPa[1] == 'KB':
-                    isRes = 1
-                if aPa[0] == 'totalResFree':
-                    total = int(aPa[1])
-                if aPa[0] == 'totalResUsed':
-                    used = int(aPa[1])
-            if isRes == 1:
-                balance = total - used
+        logging.debug('aInfo %s %d', type(aInfo), len(aInfo))
+        for dInfo in aInfo:
+            # logging.debug(dInfo)
+            if dInfo['resUnit'] == 'KB':
+                balance = int(dInfo['totalResFree']) - int(dInfo['totalResUsed'])
                 resBalance += balance
-                # print('%d - %d = %d  total: %d' % (total, used, balance, resBalance))
-        sOutInfo = u'},{'.join(aInfo)
-        # print(sOutInfo)
-        self.fOut.write(u'%s %s %d %s%s' % (self.aNum[0], self.aNum[1], resBalance, sOutInfo, os.linesep))
-        # self.fOut.write('%s' % aInfo)
+        sOut = json.dumps(aInfo, encoding="UTF-8", ensure_ascii=False)
+        self.fOut.write(u'%s %s %d %s%s' % (self.aNum[0], self.aNum[1], resBalance, sOut, os.linesep))
+
+    # def parseCsf(self, line):
+    #     line = line.strip()
+    #     # line = unicode(line,'utf-8')
+    #     # line = line.decode('utf-8')
+    #     line = line.replace(u'\\', u'')
+    #     infoLen = len(line)
+    #     # sInfo = "'%s'" % line[1:infoLen-1]
+    #     sInfo = line[1:infoLen - 1]
+    #     cmd = u'aInfo = %s' % sInfo
+    #     aInfo = eval(cmd)
+    #     # line = line.replace('},{', '|')
+    #     # aInfo = line.split('|')
+    #     logging.debug(aInfo)
+    #     resBalance = 0
+    #     for info in aInfo:
+    #         logging.debug(info)
+    #         dInfo = eval(info)
+    #         # dInfo = info
+    #         if dInfo['resUnit'] == 'KB':
+    #             balance = int(dInfo['totalResFree']) - int(dInfo['totalResUsed'])
+    #             resBalance += balance
+    #     self.fOut.write(u'%s %s %d %s%s' % (self.aNum[0], self.aNum[1], resBalance, aInfo, os.linesep))
+
+    # def parseCsf(self, line):
+    #     line = line.strip()
+    #     line = unicode(line,'utf-8')
+    #     # line = line.decode('utf-8')
+    #     line = line.replace(r'\"', '')
+    #     # infoLen = len(line)
+    #     # # sInfo = "'%s'" % line[1:infoLen-1]
+    #     # sInfo = line[1:infoLen - 1]
+    #     # cmd = 'aInfo = %s' % sInfo
+    #     # aInfo = eval(cmd)
+    #     line = line.replace('},{', '|')
+    #     aInfo = line.split('|')
+    #     logging.debug(aInfo)
+    #     resBalance = 0
+    #     for info in aInfo:
+    #         logging.debug(info)
+    #         # # dInfo = eval(info)
+    #         # dInfo = info
+    #         # if dInfo['resUnit'] == 'KB':
+    #         #     balance = int(dInfo['totalResFree']) - int(dInfo['totalResUsed'])
+    #         #     resBalance += balance
+    #         aRow = info.split(',')
+    #         isRes = 0
+    #         total = 0
+    #         used = 0
+    #         balance = 0
+    #         for pa in aRow:
+    #             aPa = pa.split(':')
+    #             if aPa[0] == 'resUnit' and aPa[1] == 'KB':
+    #                 isRes = 1
+    #             if aPa[0] == 'totalResFree':
+    #                 total = int(aPa[1])
+    #             if aPa[0] == 'totalResUsed':
+    #                 used = int(aPa[1])
+    #         if isRes == 1:
+    #             balance = total - used
+    #             resBalance += balance
+    #             # print('%d - %d = %d  total: %d' % (total, used, balance, resBalance))
+    #     sOutInfo = u'},{'.join(aInfo)
+    #     # print(sOutInfo)
+    #     self.fOut.write(u'%s %s %d %s%s' % (self.aNum[0], self.aNum[1], resBalance, sOutInfo, os.linesep))
+    #     # self.fOut.write('%s' % aInfo)
 
     def exit(self):
         self.fOut.close()
