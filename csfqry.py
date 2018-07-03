@@ -456,7 +456,10 @@ class CsfTool(object):
     def query(self):
         logging.debug(self.cmd)
         # f = subprocess.Popen((self.cmd), stdout=subprocess.PIPE).stdout
-        f = os.popen(self.cmd)
+        try:
+            f = os.popen(self.cmd)
+        except Exception, e:
+            logging.info('%s error: %s', self.cmd, e)
         finded = 0
         # logging.info(self.dPatt)
         for line in f:
@@ -476,7 +479,9 @@ class CsfTool(object):
                     elif key == '40outend':
                         finded = 0
                     break
-        f.close()
+        exitValue = f.close()
+        if exitValue:
+            logging.error('%s error: %s',self.aNum[0], exitValue)
 
     def parseCsf(self, line):
         line = unicode(line, 'utf-8')
@@ -494,12 +499,16 @@ class CsfTool(object):
             # logging.debug(dInfo)
             if dInfo['resUnit'] == 'KB':
                 if dInfo['resFreeType'] in self.aExcluId:
+                    logging.info('excluded: %d', dInfo['resFreeType'])
                     continue
                 balance = int(dInfo['totalResFree']) - int(dInfo['totalResUsed'])
                 resBalance += balance
                 total += dInfo['totalResFree']
                 # billid,prodId,validDate,expireDate,totalResFree,totalResUsed,balance,prodName,resFreeName,resFreeType,
-                self.fDetail.write(u'%s,%d,%s,%s,%d,%d,%d,%s,%s,%d%s' % (self.aNum[0], dInfo['prodId'], dInfo['validDate'], dInfo['expireDate'], dInfo['totalResFree'], dInfo['totalResUsed'], balance, dInfo['prodName'], dInfo['resFreeName'], dInfo['resFreeType'], os.linesep))
+                logging.debug(json.dumps(dInfo, encoding="utf-8", ensure_ascii=False))
+                outDetail = '%s,%d,%s%s' % (self.aNum[0], balance, json.dumps(dInfo, encoding="UTF-8", ensure_ascii=False), os.linesep)
+                self.fDetail.write(outDetail)
+                # self.fDetail.write(u'%s,%d,%s,%s,%d,%d,%d,%s,%s,%d%s' % (self.aNum[0], dInfo['prodId'], dInfo['validDate'], dInfo['expireDate'], dInfo['totalResFree'], dInfo['totalResUsed'], balance, dInfo['prodName'], dInfo['resFreeName'], dInfo['resFreeType'], os.linesep))
 
         # sOut = json.dumps(aInfo, encoding="UTF-8", ensure_ascii=False)
         # bill_id,total,totalbalance
@@ -593,7 +602,9 @@ class Director(object):
         fExl = self.main.openFile(self.main.excludeFile, 'r')
         aExclu = []
         for line in fExl:
-            aExclu.append(line.strip())
+            line = line.strip()
+            aId = line.split()
+            aExclu.append(int(aId[0]))
         fExl.close()
         aSorted = sorted(aExclu)
         self.aExcluId = aSorted
@@ -601,6 +612,7 @@ class Director(object):
         logging.debug(aSorted)
 
     def start(self):
+        self.loadExcludeId()
         logging.info('csf tool starting...')
         self.csfClient.setWorkEnv()
 
